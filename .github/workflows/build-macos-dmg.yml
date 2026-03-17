@@ -107,9 +107,7 @@ jobs:
           chmod -R u+w dist/BallonsTranslator.app
           
           # Create temp build directory in home directory (better permissions)
-          DMG_BUILD="${HOME}/dmg_build"
-          rm -rf "$DMG_BUILD"
-          mkdir -p "$DMG_BUILD"
+          DMG_BUILD="${HOME}/build"
           
           # Copy app
           cp -r dist/BallonsTranslator.app "$DMG_BUILD/"
