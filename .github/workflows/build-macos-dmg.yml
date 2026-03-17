@@ -103,25 +103,49 @@ jobs:
         run: |
           echo "Creating DMG installer..."
           
-          mkdir -p dmg_build
-          cp -r dist/BallonsTranslator.app dmg_build/
-          ln -s /Applications dmg_build/Applications
+          # Set proper permissions
+          chmod -R u+w dist/BallonsTranslator.app
           
+          # Create temp build directory in home directory (better permissions)
+          DMG_BUILD="${HOME}/dmg_build"
+          rm -rf "$DMG_BUILD"
+          mkdir -p "$DMG_BUILD"
+          
+          # Copy app
+          cp -r dist/BallonsTranslator.app "$DMG_BUILD/"
+          
+          # Create symlink
+          ln -s /Applications "$DMG_BUILD/Applications"
+          
+          # Set permissions on build directory
+          chmod -R 755 "$DMG_BUILD"
+          
+          # Create DMG
+          echo "Running hdiutil..."
           hdiutil create \
             -volname "${{ env.APP_NAME }}" \
-            -srcfolder dmg_build \
+            -srcfolder "$DMG_BUILD" \
             -ov \
             -format UDZO \
-            dist/${{ env.APP_NAME }}-$(date +%Y%m%d).dmg
+            -imagekey zlib-level=9 \
+            "dist/${{ env.APP_NAME }}-$(date +%Y%m%d).dmg" 2>&1
           
-          if [ $? -eq 0 ]; then
-            echo "✓ DMG created successfully"
-            ls -lah dist/*.dmg
+          # Verify
+          DMG_FILE=$(ls -t dist/*.dmg 2>/dev/null | head -1)
+          if [ -f "$DMG_FILE" ]; then
+            echo "✓ DMG created successfully: $DMG_FILE"
+            ls -lah "$DMG_FILE"
+            du -sh "$DMG_FILE"
           else
             echo "✗ DMG creation failed"
+            echo "Checking dist directory:"
+            ls -lah dist/
             exit 1
           fi
-      
+          
+          # Clean up
+          rm -rf "$DMG_BUILD"
+          
       - name: Extract version
         id: version
         run: |
