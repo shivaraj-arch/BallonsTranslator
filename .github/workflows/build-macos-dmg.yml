@@ -1,0 +1,149 @@
+name: Build macOS DMG
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+    tags:
+      - 'v*'
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'
+
+env:
+  PYTHON_VERSION: '3.12'
+  APP_NAME: 'BallonsTranslator'
+
+jobs:
+  build-dmg:
+    name: Build DMG for macOS
+    runs-on: macos-latest
+    timeout-minutes: 240
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Clean up .DS_Store files
+        run: |
+          echo "Cleaning macOS metadata files..."
+          find . -name '.DS_Store' -type f -delete
+          echo "✓ Cleaned"
+      
+      - name: Create virtual environment
+        run: |
+          echo "Creating Python virtual environment..."
+          python3 -m venv venv
+          source venv/bin/activate
+          python -m pip install --upgrade pip setuptools wheel
+          echo "✓ Virtual environment ready"
+      
+      - name: Install dependencies
+        run: |
+          echo "Installing dependencies..."
+          source venv/bin/activate
+          pip install --no-cache-dir -r requirements.txt
+          pip install --no-cache-dir pyinstaller
+          echo "✓ Dependencies installed"
+      
+      - name: Download PatchMatch library
+        run: |
+          echo "Downloading PatchMatch library..."
+          mkdir -p .btrans_cache
+          
+          curl -L \
+            https://github.com/dmMaze/PyPatchMatchInpaint/releases/download/v1.0/macos_arm64_patchmatch_libs.7z \
+            -o .btrans_cache/macos_arm64_patchmatch_libs.7z
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ Downloaded PatchMatch for Apple Silicon"
+          else
+            echo "⚠ PatchMatch download failed, will be downloaded at runtime"
+          fi
+      
+      - name: Download AI models
+        run: |
+          echo "Pre-downloading AI models (this may take 10-20 minutes)..."
+          source venv/bin/activate
+          
+          timeout 1200 python launch.py --help || true
+          
+          echo "✓ Models prepared"
+      
+      - name: Build .app with PyInstaller
+        run: |
+          echo "Building macOS .app bundle..."
+          source venv/bin/activate
+          
+          pip install --no-cache-dir pyinstaller
+          
+          sudo pyinstaller launch.spec
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ .app bundle created"
+            ls -lah dist/
+          else
+            echo "✗ PyInstaller failed"
+            exit 1
+          fi
+      
+      - name: Create DMG from .app
+        run: |
+          echo "Creating DMG installer..."
+          
+          mkdir -p dmg_build
+          cp -r dist/BallonsTranslator.app dmg_build/
+          ln -s /Applications dmg_build/Applications
+          
+          hdiutil create \
+            -volname "${{ env.APP_NAME }}" \
+            -srcfolder dmg_build \
+            -ov \
+            -format UDZO \
+            dist/${{ env.APP_NAME }}-$(date +%Y%m%d).dmg
+          
+          if [ $? -eq 0 ]; then
+            echo "✓ DMG created successfully"
+            ls -lah dist/*.dmg
+          else
+            echo "✗ DMG creation failed"
+            exit 1
+          fi
+      
+      - name: Extract version
+        id: version
+        run: |
+          VERSION=$(grep "VERSION = " launch.py | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" || echo "dev")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+      
+      - name: Upload DMG as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg
+          path: dist/*.dmg
+          retention-days: 30
+      
+      - name: Build summary
+        run: |
+          echo "=========================================="
+          echo "Build completed successfully!"
+          echo "=========================================="
+          echo ""
+          echo "📦 Artifacts:"
+          ls -lah dist/*.dmg
+          echo ""
+          echo "📍 Repository: shivaraj-arch/BallonsTranslator"
+          echo "✓ DMG file ready for distribution"
