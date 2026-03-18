@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BallonsTranslator - Manga Translator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 1000px;
+            width: 100%;
+            padding: 40px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .header h1 {
+            color: #333;
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .upload-section {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            overflow: hidden;
+            display: inline-block;
+            width: 100%;
+        }
+
+        .file-input-wrapper input[type=file] {
+            position: absolute;
+            left: -9999px;
+        }
+
+        .file-input-label {
+            display: block;
+            padding: 20px;
+            background: #f0f0f0;
+            border: 2px dashed #667eea;
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .file-input-label:hover {
+            background: #e8e8ff;
+            border-color: #764ba2;
+        }
+
+        .file-input-label.active {
+            background: #e8e8ff;
+            border-color: #764ba2;
+        }
+
+        .file-name {
+            color: #667eea;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        select, input {
+            padding: 12px 15px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1em;
+            font-family: inherit;
+        }
+
+        select {
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1em;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #d0d0d0;
+        }
+
+        .progress-section {
+            margin: 20px 0;
+            display: none;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .progress-text {
+            text-align: center;
+            color: #666;
+            margin-top: 10px;
+            font-size: 0.9em;
+        }
+
+        .result-section {
+            margin-top: 40px;
+            display: none;
+        }
+
+        .result-section.active {
+            display: block;
+        }
+
+        .result-title {
+            color: #333;
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .result-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .result-image {
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .result-image img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+
+        .text-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .text-box {
+            border: 1px solid #ddd;
+            border-radius: 10px;
+            padding: 15px;
+            background: #f9f9f9;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .text-box h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 1em;
+        }
+
+        .text-box p {
+            color: #555;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        .download-btn {
+            background: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s;
+        }
+
+        .download-btn:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+        }
+
+        .error {
+            background: #ffebee;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .error.active {
+            display: block;
+        }
+
+        .info {
+            background: #e3f2fd;
+            color: #1565c0;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-size: 0.9em;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .result-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .controls {
+                flex-direction: column;
+            }
+
+            select {
+                width: 100%;
+            }
+        }
+
+        .loading {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #667eea;
+            margin-right: 8px;
+            animation: loading 1s infinite;
+        }
+
+        @keyframes loading {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎨 BallonsTranslator</h1>
+            <p>Translate manga and comics with AI</p>
+        </div>
+
+        <div class="info">
+            <strong>ℹ️ How it works:</strong> Upload your manga/comic image, select target language, and let AI translate the text while preserving the artwork.
+        </div>
+
+        <div class="upload-section">
+            <div class="file-input-wrapper">
+                <input type="file" id="imageInput" accept="image/*">
+                <label for="imageInput" class="file-input-label">
+                    <div>📤 Click to upload or drag image here</div>
+                    <div class="file-name" id="fileName"></div>
+                </label>
+            </div>
+
+            <div class="controls">
+                <select id="targetLang">
+                    <option value="English">English</option>
+                    <option value="Spanish">Spanish</option>
+                    <option value="French">French</option>
+                    <option value="German">German</option>
+                    <option value="Chinese">Chinese</option>
+                    <option value="Japanese">Japanese</option>
+                    <option value="Korean">Korean</option>
+                </select>
+
+                <div class="button-group">
+                    <button class="btn-primary" id="translateBtn">Translate</button>
+                    <button class="btn-secondary" id="clearBtn">Clear</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="progress-section" id="progressSection">
+            <div class="progress-bar">
+                <div class="progress-fill"></div>
+            </div>
+            <div class="progress-text">
+                <span class="loading"></span>Processing... This may take 1-2 minutes
+            </div>
+        </div>
+
+        <div class="error" id="errorMsg"></div>
+
+        <div class="result-section" id="resultSection">
+            <div class="result-title">✅ Translation Complete</div>
+            
+            <div class="result-grid">
+                <div class="result-image">
+                    <img id="resultImage" src="" alt="Translated image">
+                </div>
+
+                <div class="text-section">
+                    <div class="text-box">
+                        <h3>📝 Original Text</h3>
+                        <p id="originalText"></p>
+                    </div>
+                    <div class="text-box">
+                        <h3>🌍 Translated Text</h3>
+                        <p id="translatedText"></p>
+                    </div>
+                </div>
+            </div>
+
+            <button class="download-btn" id="downloadBtn">⬇️ Download Image</button>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'https://ballons-translator-api.onrender.com';
+        // For local testing: const API_URL = 'http://localhost:8000';
+
+        const imageInput = document.getElementById('imageInput');
+        const fileName = document.getElementById('fileName');
+        const translateBtn = document.getElementById('translateBtn');
+        const clearBtn = document.getElementById('clearBtn');
+        const targetLang = document.getElementById('targetLang');
+        const progressSection = document.getElementById('progressSection');
+        const resultSection = document.getElementById('resultSection');
+        const errorMsg = document.getElementById('errorMsg');
+        const resultImage = document.getElementById('resultImage');
+        const originalText = document.getElementById('originalText');
+        const translatedText = document.getElementById('translatedText');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const fileInputLabel = document.querySelector('.file-input-label');
+
+        let selectedFile = null;
+
+        // File input handling
+        imageInput.addEventListener('change', (e) => {
+            selectedFile = e.target.files[0];
+            if (selectedFile) {
+                fileName.textContent = `✓ Selected: ${selectedFile.name}`;
+                fileInputLabel.classList.add('active');
+            }
+        });
+
+        // Drag and drop
+        fileInputLabel.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            fileInputLabel.classList.add('active');
+        });
+
+        fileInputLabel.addEventListener('dragleave', () => {
+            fileInputLabel.classList.remove('active');
+        });
+
+        fileInputLabel.addEventListener('drop', (e) => {
+            e.preventDefault();
+            selectedFile = e.dataTransfer.files[0];
+            if (selectedFile && selectedFile.type.startsWith('image/')) {
+                imageInput.files = e.dataTransfer.files;
+                fileName.textContent = `✓ Selected: ${selectedFile.name}`;
+                fileInputLabel.classList.remove('active');
+            }
+        });
+
+        // Translate button
+        translateBtn.addEventListener('click', async () => {
+            if (!selectedFile) {
+                showError('Please select an image first');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('image', selectedFile);
+            formData.append('target_lang', targetLang.value);
+
+            translateBtn.disabled = true;
+            progressSection.style.display = 'block';
+            resultSection.classList.remove('active');
+            errorMsg.classList.remove('active');
+
+            try {
+                const response = await fetch(`${API_URL}/translate`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Server error: ${response.status}`);
+                }
+
+                const data = await response.json();
+
+                if (data.status === 'success') {
+                    resultImage.src = `data:image/png;base64,${data.result_image}`;
+                    originalText.textContent = data.extracted_text || 'No text detected';
+                    translatedText.textContent = data.translated_text || 'Translation failed';
+                    resultSection.classList.add('active');
+                } else {
+                    showError('Translation failed. Please try again.');
+                }
+            } catch (error) {
+                showError(`Error: ${error.message}`);
+                console.error(error);
+            } finally {
+                translateBtn.disabled = false;
+                progressSection.style.display = 'none';
+            }
+        });
+
+        // Clear button
+        clearBtn.addEventListener('click', () => {
+            selectedFile = null;
+            imageInput.value = '';
+            fileName.textContent = '';
+            fileInputLabel.classList.remove('active');
+            resultSection.classList.remove('active');
+            errorMsg.classList.remove('active');
+        });
+
+        // Download button
+        downloadBtn.addEventListener('click', () => {
+            const link = document.createElement('a');
+            link.href = resultImage.src;
+            link.download = `translated_${Date.now()}.png`;
+            link.click();
+        });
+
+        // Error handler
+        function showError(message) {
+            errorMsg.textContent = '❌ ' + message;
+            errorMsg.classList.add('active');
+        }
+
+        // Health check on load
+        window.addEventListener('load', async () => {
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                if (!response.ok) {
+                    console.warn('API health check failed');
+                }
+            } catch (error) {
+                console.warn('Could not reach API:', error.message);
+            }
+        });
+    </script>
+</body>
+</html>
