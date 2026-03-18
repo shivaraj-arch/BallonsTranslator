@@ -46,6 +46,13 @@ pip
 *.dic
 *.aff
 *.exc
+.env
+.env.local
+.env.*.local
+*.key
+*.secret
+secrets/
+config/credentials/
 
 fonts/*
 !fonts/put fonts here.txt

@@ -16,7 +16,7 @@ class TranslateError(ProviderError):
 # --- Constants for Google Translate ---
 USER_AGENT_BROWSER = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36"
 # Use the API key from your example as a constant
-GOOGLE_API_KEY = "AIzaSyATBXajvzQLTDHEQbcpq0Ihe0vWDHmO520"
+from config.secrets import GOOGLE_API_KEY
 GOOGLE_API_URL_BASE = "https://translate-pa.googleapis.com/v1"  # Base API URL
 
 
