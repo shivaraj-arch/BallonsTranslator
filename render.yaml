@@ -1,0 +1,42 @@
+# Render Deployment Configuration
+# save as render.yaml in repository root
+
+services:
+  - type: web
+    name: ballons-translator-api
+    env: python
+    plan: free
+    
+    # Build settings
+    buildCommand: >
+      pip install -r requirements.txt &&
+      pip install -r api/requirements.txt
+    
+    # Start command
+    startCommand: uvicorn api.server:app --host 0.0.0.0 --port $PORT
+    
+    # Environment variables
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: PYTHONDONTWRITEBYTECODE
+        value: 1
+    
+    # Health check
+    healthCheckPath: /health
+    healthCheckInterval: 30
+    
+    # Auto-deploy on git push
+    autoDeploy: true
+    
+    # GitHub integration
+    repo: YOUR_GITHUB_REPO_URL
+
+# Notes:
+# 1. Replace YOUR_GITHUB_REPO_URL with your actual GitHub repository URL
+# 2. Render will automatically detect and use this configuration
+# 3. Free tier provides:
+#    - 0.5 CPU
+#    - 512MB RAM
+#    - Auto-pause after 15 minutes of inactivity
+# 4. For production with GPU, upgrade to paid plan
