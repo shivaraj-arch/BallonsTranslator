@@ -8,7 +8,10 @@ services:
     plan: free
     
     # Build settings
+    # Note: Using --no-deps and pip index to get torch CPU-only variant
+    # This avoids downloading 2.5GB+ of NVIDIA CUDA packages on free tier
     buildCommand: >
+      pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu &&
       pip install -r requirements.txt &&
       pip install -r api/requirements.txt
     
@@ -21,6 +24,12 @@ services:
         value: 1
       - key: PYTHONDONTWRITEBYTECODE
         value: 1
+      # Disable GPU support for Render free tier (CPU-only)
+      - key: CUDA_VISIBLE_DEVICES
+        value: ""
+      # Reduce memory usage for 512MB free tier limit
+      - key: PYTORCH_CUDA_ALLOC_CONF
+        value: "max_split_size_mb:256"
     
     # Health check
     healthCheckPath: /health
@@ -39,4 +48,8 @@ services:
 #    - 0.5 CPU
 #    - 512MB RAM
 #    - Auto-pause after 15 minutes of inactivity
-# 4. For production with GPU, upgrade to paid plan
+# 4. Build command installs torch from CPU index to avoid downloading 2.5GB+ 
+#    of NVIDIA CUDA packages (nvidia_cudnn, nvidia_cublas, etc.)
+#    These are unnecessary for CPU-only inference on Render free tier
+# 5. For local development with GPU acceleration, install torch normally:
+#    pip install torch torchvision (will pull CUDA packages on NVIDIA hardware)

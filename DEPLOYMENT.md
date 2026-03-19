@@ -296,9 +296,15 @@ git push origin main
 - Queue requests if concurrent users
 
 ### For Paid Plans
-- Enable GPU (NVIDIA)
+- Enable GPU (NVIDIA) - requires paid tier upgrade
 - Pre-load all models on startup
 - Increase instance size if needed
+- GPU significantly speeds up all operations (3-6x faster)
+
+<!-- GPU-specific configuration (requires paid plan):
+  export CUDA_VISIBLE_DEVICES="0"
+  export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:512
+-->
 
 ### Model Caching
 The API caches loaded models between requests. Models are unloaded after:

@@ -63,9 +63,10 @@ git push origin main
 
 **Features:**
 - Access from anywhere
-- Shared infrastructure
+- Shared infrastructure (CPU-only on free tier)
 - Persistent logs
 - Production-ready
+- Note: Free tier runs on CPU only (slower but works). Upgrade to paid for GPU acceleration.
 
 ---
 

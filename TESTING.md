@@ -545,6 +545,20 @@ print(f"Inference took {elapsed:.1f}ms")
 
 ## Expected Performance
 
+### Render Free Tier (CPU-only)
+
+| Operation | Time |
+|-----------|------|
+| Detection | 5-15s |
+| OCR | 5-10s |
+| Translation | 1-3s |
+| Inpainting | 10-30s |
+| **Full Pipeline** | **20-60s** |
+
+*Much slower than local, but functional. Expected due to CPU inference on shared infrastructure.*
+
+### Local Development (varies by hardware)
+
 | Operation | Time (CPU) | Time (GPU) |
 |-----------|-----------|-----------|
 | Detection | 2-4s | 0.5-1s |
@@ -554,6 +568,8 @@ print(f"Inference took {elapsed:.1f}ms")
 | **Full Pipeline** | **8-20s** | **3-6s** |
 
 *Times vary based on image size, model choice, and hardware*
+
+<!-- Note: GPU support requires paid Render plan or local GPU hardware -->
 
 ---
 

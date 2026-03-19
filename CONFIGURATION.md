@@ -282,8 +282,8 @@ os.environ["DEEPL_AUTH_KEY"] = DEEPL_AUTH_KEY
 **In `api/server.py`:**
 
 ```python
-# Limit cached models (free tier: max 2-3 models)
-MAX_CACHED_MODELS = 2
+# Limit cached models (free tier: max 1-2 models due to 512MB RAM limit)
+MAX_CACHED_MODELS = 1
 
 # Pre-load models on startup
 PRELOAD_MODELS = False  # Set to True if you want models ready

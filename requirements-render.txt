@@ -1,6 +1,26 @@
-# To install pytorch cuda (gpu) version, please look https://pytorch.org/
-# Note: Default torch installation is CPU-only. For GPU, see PyTorch docs.
+# BallonsTranslator Requirements for CPU-only Development (Render.com free tier)
+# 
+# Why separate file? PyTorch pulls these CUDA packages as dependencies:
+# - nvidia-cudnn-cu12 (706.8 MB)
+# - nvidia_cublas_cu12 (594.3 MB) 
+# - nvidia_cusparse_cu12 (288.2 MB)
+# - nvidia_cusolver_cu12 (267.5 MB)
+# - nvidia_cusparselt_cu12 (287.2 MB)
+# - nvidia_nccl_cu12 (322.3 MB)
+# - nvidia_curand_cu12, nvidia_cufft_cu12, nvidia_nvtx_cu12, etc.
+# Total: 2.5GB+ unnecessary on CPU-only deployments
+#
+# Solutions:
+# 1. Render.com: Uses render.yaml buildCommand with --index-url 
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+#
+# 2. Local CPU development: 
+#    pip install -r requirements-render.txt
+#
+# 3. Desktop app (GPU/CPU mixed):
+#    pip install -r requirements.txt
 
+# All packages EXCEPT torch (handled separately with CPU index)
 PyQt6-Qt6>=6.6.2 ; python_version > "3.8"
 PyQt6>=6.6.1 ; python_version > "3.8"
 PyQt5-Qt5>=5.15.2 ; python_version <= "3.8"
@@ -8,8 +28,9 @@ PyQt5>=5.15.10 ; python_version <= "3.8"
 numpy<2
 urllib3
 jaconv
-torch
-torchvision
+# torch - installed separately from CPU index
+# torch (will be installed with: pip install torch --index-url https://download.pytorch.org/whl/cpu)
+torchvision  # also from CPU index in render.yaml
 transformers==4.57.1
 mecab-python3; sys_platform == 'darwin'
 fugashi
@@ -62,3 +83,9 @@ gunicorn
 uvicorn[standard]
 fastapi
 python-multipart
+
+# For API server
+aiofiles==23.2.1
+pydantic==2.5.0
+
+
