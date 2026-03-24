@@ -3,7 +3,7 @@ BallonsTranslator API Server
 REST API for manga/comic translation pipeline
 Root URL: https://ballons-translator-api.onrender.com/
 """
-from fastapi import FastAPI, UploadFile, File, Query, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -11,7 +11,7 @@ from typing import List, Optional
 import logging
 import numpy as np
 
-from pipeline import (
+from .pipeline import (
     get_pipeline, 
     get_available_models, 
     TranslationPipeline
@@ -225,8 +225,8 @@ async def detect_text(request: DetectRequest):
         )
     
     except Exception as e:
-        logger.error(f"Detection error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error("Detection error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # ============================================
 # OCR Endpoint
@@ -262,8 +262,8 @@ async def recognize_text(request: OCRRequest):
         )
     
     except Exception as e:
-        logger.error(f"OCR error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error("OCR error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # ============================================
 # Translation Endpoint
@@ -299,8 +299,8 @@ async def translate_texts(request: TranslateRequest):
         )
     
     except Exception as e:
-        logger.error(f"Translation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error("Translation error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # ============================================
 # Inpainting Endpoint
@@ -342,8 +342,8 @@ async def inpaint_image(request: InpaintRequest):
         )
     
     except Exception as e:
-        logger.error(f"Inpainting error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error("Inpainting error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # ============================================
 # Full Pipeline Endpoints
@@ -392,7 +392,7 @@ async def full_translation_pipeline(request: FullPipelineRequest):
         if request.enable_detection:
             detect_result = pipeline.detect_text(image_array)
             detected_regions = detect_result.get("regions", [])
-            logger.info(f"Detection: {len(detected_regions)} regions found")
+            logger.info("Detection: %d regions found", len(detected_regions))
         
         # Step 2: OCR
         if request.enable_ocr:
@@ -401,7 +401,7 @@ async def full_translation_pipeline(request: FullPipelineRequest):
                 detected_regions if request.enable_detection else None
             )
             extracted_texts = ocr_result.get("texts", [])
-            logger.info(f"OCR: {len(extracted_texts)} texts extracted")
+            logger.info("OCR: %d texts extracted", len(extracted_texts))
         
         # Step 3: Translation
         if request.enable_translation and extracted_texts:
@@ -411,7 +411,7 @@ async def full_translation_pipeline(request: FullPipelineRequest):
                 request.target_lang
             )
             translated_texts = trans_result.get("translations", [])
-            logger.info(f"Translation: {len(translated_texts)} texts translated")
+            logger.info("Translation: %d texts translated", len(translated_texts))
         
         # Step 4: Inpainting
         if request.enable_inpainting:
@@ -425,7 +425,8 @@ async def full_translation_pipeline(request: FullPipelineRequest):
                         if isinstance(region, (list, tuple)) and len(region) >= 4:
                             x, y, w, h = region[:4]
                             mask_array[int(y):int(y+h), int(x):int(x+w)] = 255
-                    except:
+                    except (IndexError, TypeError, ValueError):
+                        # Skip malformed regions
                         pass
                 
                 inpaint_result = pipeline.inpaint_image(image_array, mask_array)
@@ -445,8 +446,8 @@ async def full_translation_pipeline(request: FullPipelineRequest):
         )
     
     except Exception as e:
-        logger.error(f"Pipeline error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        logger.error("Pipeline error: %s", e)
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 # ============================================
 # Legacy File Upload Endpoint (for backward compatibility)
@@ -486,8 +487,8 @@ async def translate_file(image: UploadFile = File(...), target_lang: str = "Engl
             "translated_text": "\n".join(result.translated_texts)
         })
     
-    except Exception as e:
-        logger.error(f"Legacy endpoint error: {e}")
+    except (HTTPException, RuntimeError, ValueError, TypeError, OSError) as e:
+        logger.error("Legacy endpoint error: %s", e)
         return JSONResponse(
             {"status": "error", "message": str(e)},
             status_code=500

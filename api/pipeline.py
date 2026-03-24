@@ -6,26 +6,35 @@ import os
 import sys
 import base64
 import io
+from functools import lru_cache
 import numpy as np
-import cv2
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from PIL import Image
 import logging
 
 logger = logging.getLogger(__name__)
+
+PIPELINE_EXCEPTIONS = (
+    RuntimeError,
+    ValueError,
+    TypeError,
+    AttributeError,
+    ImportError,
+    OSError,
+)
 
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from modules import GET_VALID_TEXTDETECTORS, GET_VALID_INPAINTERS, GET_VALID_TRANSLATORS, GET_VALID_OCR
-    from modules.base import BaseModule
-    from utils.config import ProgramConfig, pcfg
-    from utils.textblock import TextBlock
-    from utils.logger import logger as app_logger
+    # from modules.base import BaseModule
+    # from utils.config import ProgramConfig, pcfg
+    # from utils.textblock import TextBlock
+    # from utils.logger import logger as app_logger
     IMPORTS_AVAILABLE = True
 except ImportError as e:
-    logger.warning(f"Could not import BallonsTranslator modules: {e}. Running in stub mode.")
+    logger.warning("Could not import BallonsTranslator modules: %s. Running in stub mode.", e)
     IMPORTS_AVAILABLE = False
 
 
@@ -49,8 +58,8 @@ class TranslationPipeline:
                     self.config = program_config.pcfg
                 self.initialized = True
                 logger.info("Pipeline initialized successfully")
-            except Exception as e:
-                logger.error(f"Failed to initialize pipeline: {e}")
+            except PIPELINE_EXCEPTIONS as e:
+                logger.error("Failed to initialize pipeline: %s", e)
     
     def load_detector(self, detector_name: str = "craft"):
         """Load text detection model"""
@@ -62,12 +71,12 @@ class TranslationPipeline:
             if detector_name in TEXTDETECTORS.module_dict:
                 self.detector = TEXTDETECTORS.module_dict[detector_name]()
                 self.detector.load_model()
-                logger.info(f"Loaded detector: {detector_name}")
+                logger.info("Loaded detector: %s", detector_name)
                 return {"status": "success", "detector": detector_name}
             else:
                 return {"status": "error", "message": f"Detector {detector_name} not found"}
-        except Exception as e:
-            logger.error(f"Failed to load detector: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Failed to load detector: %s", e)
             return {"status": "error", "message": str(e)}
     
     def load_ocr(self, ocr_name: str = "paddleocr"):
@@ -80,12 +89,12 @@ class TranslationPipeline:
             if ocr_name in OCR.module_dict:
                 self.ocr = OCR.module_dict[ocr_name]()
                 self.ocr.load_model()
-                logger.info(f"Loaded OCR: {ocr_name}")
+                logger.info("Loaded OCR: %s", ocr_name)
                 return {"status": "success", "ocr": ocr_name}
             else:
                 return {"status": "error", "message": f"OCR {ocr_name} not found"}
-        except Exception as e:
-            logger.error(f"Failed to load OCR: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Failed to load OCR: %s", e)
             return {"status": "error", "message": str(e)}
     
     def load_translator(self, translator_name: str = "google"):
@@ -97,12 +106,12 @@ class TranslationPipeline:
             from modules import TRANSLATORS
             if translator_name in TRANSLATORS.module_dict:
                 self.translator = TRANSLATORS.module_dict[translator_name]()
-                logger.info(f"Loaded translator: {translator_name}")
+                logger.info("Loaded translator: %s", translator_name)
                 return {"status": "success", "translator": translator_name}
             else:
                 return {"status": "error", "message": f"Translator {translator_name} not found"}
-        except Exception as e:
-            logger.error(f"Failed to load translator: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Failed to load translator: %s", e)
             return {"status": "error", "message": str(e)}
     
     def load_inpainter(self, inpainter_name: str = "lama"):
@@ -115,12 +124,12 @@ class TranslationPipeline:
             if inpainter_name in INPAINTERS.module_dict:
                 self.inpainter = INPAINTERS.module_dict[inpainter_name]()
                 self.inpainter.load_model()
-                logger.info(f"Loaded inpainter: {inpainter_name}")
+                logger.info("Loaded inpainter: %s", inpainter_name)
                 return {"status": "success", "inpainter": inpainter_name}
             else:
                 return {"status": "error", "message": f"Inpainter {inpainter_name} not found"}
-        except Exception as e:
-            logger.error(f"Failed to load inpainter: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Failed to load inpainter: %s", e)
             return {"status": "error", "message": str(e)}
     
     def detect_text(self, image_array: np.ndarray) -> Dict:
@@ -135,14 +144,14 @@ class TranslationPipeline:
         try:
             # Run detection
             results = self.detector(image_array)
-            logger.info(f"Detected {len(results) if results else 0} text regions")
+            logger.info("Detected %d text regions", len(results) if results else 0)
             return {
                 "status": "success",
                 "regions": results if results else [],
                 "count": len(results) if results else 0
             }
-        except Exception as e:
-            logger.error(f"Detection failed: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Detection failed: %s", e)
             return {"status": "error", "message": str(e)}
     
     def recognize_text(self, image_array: np.ndarray, regions: List = None) -> Dict:
@@ -164,14 +173,14 @@ class TranslationPipeline:
                 text = self.ocr(image_array)
                 texts.append(text)
             
-            logger.info(f"Recognized {len(texts)} text blocks")
+            logger.info("Recognized %d text blocks", len(texts))
             return {
                 "status": "success",
                 "texts": texts,
                 "count": len(texts)
             }
-        except Exception as e:
-            logger.error(f"OCR failed: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("OCR failed: %s", e)
             return {"status": "error", "message": str(e)}
     
     def translate_text(self, texts: List[str], source_lang: str = "auto", target_lang: str = "English") -> Dict:
@@ -196,14 +205,14 @@ class TranslationPipeline:
                 else:
                     translations.append("")
             
-            logger.info(f"Translated {len(translations)} texts")
+            logger.info("Translated %d texts", len(translations))
             return {
                 "status": "success",
                 "translations": translations,
                 "count": len(translations)
             }
-        except Exception as e:
-            logger.error(f"Translation failed: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Translation failed: %s", e)
             return {"status": "error", "message": str(e)}
     
     def inpaint_image(self, image_array: np.ndarray, mask_array: np.ndarray) -> Dict:
@@ -222,8 +231,8 @@ class TranslationPipeline:
                 "status": "success",
                 "image": inpainted
             }
-        except Exception as e:
-            logger.error(f"Inpainting failed: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Inpainting failed: %s", e)
             return {"status": "error", "message": str(e)}
     
     @staticmethod
@@ -231,18 +240,17 @@ class TranslationPipeline:
         """Convert numpy array to base64 string"""
         try:
             if len(image_array.shape) == 3 and image_array.shape[2] == 3:
-                # Convert BGR to RGB if needed
-                image_rgb = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
+                image_rgb = image_array[:, :, ::-1]
             else:
                 image_rgb = image_array
-            
-            img = Image.fromarray(image_rgb.astype('uint8'))
+
+            img = Image.fromarray(image_rgb.astype("uint8"))
             buffered = io.BytesIO()
             img.save(buffered, format="PNG")
             img_base64 = base64.b64encode(buffered.getvalue()).decode()
             return img_base64
-        except Exception as e:
-            logger.error(f"Failed to convert image to base64: {e}")
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Failed to convert image to base64: %s", e)
             return ""
     
     @staticmethod
@@ -250,35 +258,27 @@ class TranslationPipeline:
         """Convert base64 string to numpy array"""
         try:
             image_data = base64.b64decode(image_base64)
-            image = Image.open(io.BytesIO(image_data))
-            image_array = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            return image_array
-        except Exception as e:
-            logger.error(f"Failed to convert base64 to image: {e}")
+            image = Image.open(io.BytesIO(image_data)).convert("RGB")
+            return np.array(image)[:, :, ::-1]
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Failed to convert base64 to image: %s", e)
             return None
     
     @staticmethod
     def bytes_to_image(image_bytes: bytes) -> Optional[np.ndarray]:
         """Convert bytes to numpy array"""
         try:
-            nparr = np.frombuffer(image_bytes, np.uint8)
-            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-            return image
-        except Exception as e:
-            logger.error(f"Failed to convert bytes to image: {e}")
+            image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            return np.array(image)[:, :, ::-1]
+        except PIPELINE_EXCEPTIONS as e:
+            logger.error("Failed to convert bytes to image: %s", e)
             return None
 
 
-# Global pipeline instance
-_pipeline = None
-
-
+@lru_cache(maxsize=1)
 def get_pipeline() -> TranslationPipeline:
     """Get or create global pipeline instance"""
-    global _pipeline
-    if _pipeline is None:
-        _pipeline = TranslationPipeline()
-    return _pipeline
+    return TranslationPipeline()
 
 
 def get_available_models() -> Dict:
