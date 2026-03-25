@@ -6,6 +6,8 @@ import os
 import sys
 import base64
 import io
+import re
+import importlib
 from functools import lru_cache
 import numpy as np
 from typing import Any, List, Dict, Optional
@@ -39,19 +41,81 @@ except ImportError as e:
 
 
 @lru_cache(maxsize=1)
+def collect_module_import_diagnostics() -> Dict[str, Any]:
+    """Import module scripts individually and capture failures for diagnostics."""
+    diagnostics = {
+        "imports_available": IMPORTS_AVAILABLE,
+        "initialized": False,
+        "registered": {
+            "detectors": [],
+            "ocr": [],
+            "translators": [],
+            "inpainters": [],
+        },
+        "failures": {
+            "detectors": [],
+            "ocr": [],
+            "translators": [],
+            "inpainters": [],
+        },
+    }
+
+    if not IMPORTS_AVAILABLE:
+        return diagnostics
+
+    try:
+        from modules.base import MODULE_SCRIPTS
+
+        kind_map = {
+            "textdetector": "detectors",
+            "ocr": "ocr",
+            "translator": "translators",
+            "inpainter": "inpainters",
+        }
+
+        for module_kind, script_info in MODULE_SCRIPTS.items():
+            output_key = kind_map[module_kind]
+            module_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), script_info["module_dir"])
+            pattern = re.compile(script_info["module_pattern"])
+            module_prefix = script_info["module_dir"].replace("/", ".") + "."
+
+            for file_name in sorted(os.listdir(module_dir)):
+                if pattern.match(file_name) is None:
+                    continue
+                module_name = module_prefix + file_name.replace(".py", "")
+                try:
+                    importlib.import_module(module_name)
+                except Exception as exc:  # pylint: disable=broad-exception-caught
+                    diagnostics["failures"][output_key].append(
+                        {"module": module_name, "error": str(exc)}
+                    )
+
+        diagnostics["registered"] = {
+            "detectors": list(GET_VALID_TEXTDETECTORS()),
+            "ocr": list(GET_VALID_OCR()),
+            "translators": list(GET_VALID_TRANSLATORS()),
+            "inpainters": list(GET_VALID_INPAINTERS()),
+        }
+        diagnostics["initialized"] = True
+    except PIPELINE_EXCEPTIONS as e:
+        logger.error("Failed to collect module diagnostics: %s", e)
+
+    return diagnostics
+
+
+@lru_cache(maxsize=1)
 def initialize_runtime_modules() -> bool:
     """Initialize module registries the same way the desktop launcher does."""
     if not IMPORTS_AVAILABLE:
         return False
 
     try:
-        from modules.base import init_module_registries
         from modules.prepare_local_files import prepare_local_files_forall
 
-        init_module_registries()
+        diagnostics = collect_module_import_diagnostics()
         prepare_local_files_forall()
         logger.info("Module registries initialized successfully")
-        return True
+        return diagnostics.get("initialized", False)
     except PIPELINE_EXCEPTIONS as e:
         logger.error("Failed to initialize module registries: %s", e)
         return False
@@ -329,6 +393,11 @@ def get_available_models() -> Dict:
         "translators": list(GET_VALID_TRANSLATORS()),
         "inpainters": list(GET_VALID_INPAINTERS())
     }
+
+
+def get_module_diagnostics() -> Dict[str, Any]:
+    """Return import diagnostics for module discovery on the backend."""
+    return collect_module_import_diagnostics()
 
 
 def get_translator_languages(translator_name: str) -> Dict[str, Any]:

@@ -16,6 +16,7 @@ from .pipeline import (
     get_available_models, 
     TranslationPipeline,
     get_translator_languages,
+    get_module_diagnostics,
 )
 
 # Configure logging
@@ -178,10 +179,21 @@ def health():
 def list_models():
     """List available ML models"""
     models = get_available_models()
+    diagnostics = get_module_diagnostics()
     return {
         "status": "success",
         "models": models,
-        "total": sum(len(v) for v in models.values() if isinstance(v, list))
+        "total": sum(len(v) for v in models.values() if isinstance(v, list)),
+        "diagnostics": diagnostics,
+    }
+
+
+@app.get("/debug/modules")
+def debug_modules():
+    """Return backend module import diagnostics for Render debugging."""
+    return {
+        "status": "success",
+        "diagnostics": get_module_diagnostics(),
     }
 
 

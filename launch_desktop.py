@@ -8,7 +8,37 @@ import subprocess
 import base64
 import io
 import json
+import re
 from functools import lru_cache
+
+import httpx
+from PIL import Image
+
+os.environ.setdefault("QT_API", "pyqt6")
+
+from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal, QLocale, QTranslator  # pylint: disable=no-name-in-module,import-error
+from PyQt6.QtGui import QPixmap, QImage, QFont, QFontDatabase, QGuiApplication  # pylint: disable=no-name-in-module,import-error
+from PyQt6.QtWidgets import (  # pylint: disable=no-name-in-module,import-error
+    QApplication,
+    QMainWindow,
+    QWidget,
+    QSplitter,
+    QVBoxLayout,
+    QHBoxLayout,
+    QPushButton,
+    QLabel,
+    QComboBox,
+    QFileDialog,
+    QMessageBox,
+    QProgressBar,
+    QTextEdit,
+    QCheckBox,
+    QGroupBox,
+    QTabWidget,
+    QFormLayout,
+    QLineEdit,
+    QScrollArea,
+)
 
 
 BRANCH = "desktop-api"
@@ -28,6 +58,7 @@ DEFAULT_API_URL = os.environ.get(
     "BALLOONSTRANSLATOR_API_URL",
     "https://ballons-translator-api.onrender.com",
 )
+PLACEHOLDER_TRANSLATORS = {"None", "Copy Source", ""}
 
 
 parser = argparse.ArgumentParser()
@@ -139,32 +170,38 @@ def prepare_environment():
         return
 
 
-def build_desktop_classes():
-    import httpx
-    from PIL import Image
-    from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
-    from PyQt6.QtGui import QPixmap, QImage
-    from PyQt6.QtWidgets import (
-        QApplication,
-        QMainWindow,
-        QWidget,
-        QVBoxLayout,
-        QHBoxLayout,
-        QPushButton,
-        QLabel,
-        QComboBox,
-        QFileDialog,
-        QMessageBox,
-        QProgressBar,
-        QTextEdit,
-        QCheckBox,
-        QGroupBox,
-        QTabWidget,
-        QFormLayout,
-        QLineEdit,
-        QScrollArea,
-    )
+@lru_cache(maxsize=1)
+def get_local_google_languages():
+    """Read the Google translator language map from the local repo for UI fallback."""
+    trans_google_path = PATH_ROOT / "modules" / "translators" / "trans_google.py"
+    languages = []
+    pattern = re.compile(r'self\.lang_map\["([^"]+)"\]\s*=')
 
+    try:
+        with trans_google_path.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                match = pattern.search(line)
+                if match:
+                    language = match.group(1)
+                    if language not in languages:
+                        languages.append(language)
+    except OSError:
+        languages = []
+
+    if not languages:
+        languages = ["Auto", "English", "日本語", "简体中文"]
+
+    return {
+        "status": "success",
+        "translator": "google",
+        "source_languages": languages,
+        "target_languages": [language for language in languages if language != "Auto"],
+        "default_source": "Auto",
+        "default_target": "English",
+    }
+
+
+def build_desktop_classes():
     class BallonsAPIClient:
         def __init__(self, base_url: str, timeout: float):
             self.base_url = base_url.rstrip("/")
@@ -261,7 +298,12 @@ def build_desktop_classes():
             try:
                 response = self.get_client().post(f"{self.base_url}/pipeline/full", json=payload)
                 response.raise_for_status()
-                return response.json()
+                result = response.json()
+                result["_meta"] = {
+                    "status_code": response.status_code,
+                    "request_id": response.headers.get("rndr-id", ""),
+                }
+                return result
             except httpx.HTTPError as exc:
                 return {"status": "error", "message": str(exc)}
 
@@ -328,13 +370,16 @@ def build_desktop_classes():
             self.result_image = None
             self.pipeline_worker = None
             self.models_loaded = False
+            self.available_models = {}
             self.translator_languages = {}
+            self.fallback_translator_names = ["google"]
             self.keepalive_interval_ms = max(args.keepalive_interval, 30) * 1000
             self.keepalive_timer = QTimer(self)
             self.keepalive_timer.setInterval(self.keepalive_interval_ms)
             self.keepalive_timer.timeout.connect(self.on_keepalive_tick)
 
             self.init_ui(api_url)
+            self.apply_local_translator_fallback()
             self.start_keepalive(immediate=True)
 
             if startup_image:
@@ -350,14 +395,17 @@ def build_desktop_classes():
             main_layout = QHBoxLayout()
             main_layout.setContentsMargins(16, 16, 16, 16)
             main_layout.setSpacing(16)
+            splitter = QSplitter(Qt.Orientation.Horizontal)
+            splitter.setChildrenCollapsible(False)
 
             left_panel = QWidget()
             left_panel.setObjectName("leftPanel")
-            left_panel.setMaximumWidth(420)
+            left_panel.setMinimumWidth(320)
             left_layout = QVBoxLayout(left_panel)
             left_layout.setContentsMargins(0, 0, 0, 0)
             left_layout.setSpacing(12)
-            right_layout = QVBoxLayout()
+            right_panel = QWidget()
+            right_layout = QVBoxLayout(right_panel)
             right_layout.setSpacing(12)
 
             title = QLabel("BallonsTranslator API Client")
@@ -448,6 +496,11 @@ def build_desktop_classes():
             self.status_label = QLabel("Ready")
             self.status_label.setWordWrap(True)
             left_layout.addWidget(self.status_label)
+
+            self.backend_info_label = QLabel("Backend: no request sent yet")
+            self.backend_info_label.setWordWrap(True)
+            left_layout.addWidget(self.backend_info_label)
+
             left_layout.addStretch()
 
             left_scroll = QScrollArea()
@@ -500,14 +553,19 @@ def build_desktop_classes():
             self.save_btn.setMinimumHeight(40)
             right_layout.addWidget(self.save_btn)
 
-            main_layout.addWidget(left_scroll, 0)
-            main_layout.addLayout(right_layout, 2)
+            splitter.addWidget(left_scroll)
+            splitter.addWidget(right_panel)
+            splitter.setStretchFactor(0, 0)
+            splitter.setStretchFactor(1, 1)
+            splitter.setSizes([380, 760])
+            main_layout.addWidget(splitter)
             central_widget.setLayout(main_layout)
             self.setStyleSheet(self.get_stylesheet())
 
         def load_available_models(self):
             models_response = self.api_client.list_models()
             models = models_response.get("models", {})
+            self.available_models = models
 
             for combo, items in (
                 (self.detector_combo, models.get("detectors", [])),
@@ -519,18 +577,51 @@ def build_desktop_classes():
                 combo.addItems(items)
 
             translators = models.get("translators", [])
+            real_translators = [name for name in translators if name not in PLACEHOLDER_TRANSLATORS]
+            if "google" not in real_translators:
+                real_translators = ["google", *real_translators]
             self.translator_combo.blockSignals(True)
             self.translator_combo.clear()
-            self.translator_combo.addItems(translators)
+            self.translator_combo.addItems(real_translators)
             self.translator_combo.blockSignals(False)
 
-            default_translator = "google" if "google" in translators else (translators[0] if translators else "")
+            default_translator = "google" if "google" in real_translators else (real_translators[0] if real_translators else "")
             if default_translator:
                 self.translator_combo.setCurrentText(default_translator)
                 self.ensure_translator_languages(default_translator)
+            elif self.enable_translate.isChecked():
+                self.apply_local_translator_fallback()
+                self.status_label.setText(
+                    "Using local Google language fallback. The backend still needs a real translator deployment to execute translation."
+                )
 
             self.models_loaded = any(bool(items) for items in models.values())
             return models_response
+
+        def validate_pipeline_configuration(self):
+            missing_parts = []
+            detectors = self.available_models.get("detectors", [])
+            ocr_models = self.available_models.get("ocr", [])
+            translators = self.available_models.get("translators", [])
+
+            if self.enable_detect.isChecked() and not detectors:
+                missing_parts.append("text detectors")
+            if self.enable_ocr.isChecked() and not ocr_models:
+                missing_parts.append("OCR models")
+            if self.enable_translate.isChecked() and not [name for name in translators if name not in PLACEHOLDER_TRANSLATORS]:
+                missing_parts.append("real translators")
+
+            return missing_parts
+
+        def apply_local_translator_fallback(self):
+            fallback = get_local_google_languages()
+            self.translator_languages["google"] = fallback
+            self.translator_combo.blockSignals(True)
+            if self.translator_combo.findText("google") == -1:
+                self.translator_combo.insertItem(0, "google")
+            self.translator_combo.setCurrentText("google")
+            self.translator_combo.blockSignals(False)
+            self.ensure_translator_languages("google")
 
         def start_keepalive(self, immediate: bool = False):
             if not self.keepalive_timer.isActive():
@@ -551,12 +642,14 @@ def build_desktop_classes():
                 self.stop_keepalive()
 
         def ensure_translator_languages(self, translator_name: str):
-            if not translator_name:
+            if not translator_name or translator_name in PLACEHOLDER_TRANSLATORS:
                 return
 
             cached = self.translator_languages.get(translator_name)
             if cached is None:
                 cached = self.api_client.get_translator_languages(translator_name)
+                if cached.get("status") != "success" and translator_name == "google":
+                    cached = get_local_google_languages()
                 self.translator_languages[translator_name] = cached
 
             if cached.get("status") != "success":
@@ -588,7 +681,7 @@ def build_desktop_classes():
             self.target_lang.blockSignals(False)
 
         def on_translator_changed(self, translator_name: str):
-            if self.models_loaded and translator_name:
+            if self.models_loaded and translator_name and translator_name not in PLACEHOLDER_TRANSLATORS:
                 self.ensure_translator_languages(translator_name)
 
         def upload_image(self):
@@ -623,6 +716,8 @@ def build_desktop_classes():
                 QMessageBox.warning(self, "Warning", "Please open an image first")
                 return
 
+            translator_name = self.translator_combo.currentText()
+
             self.api_status_label.setText("API status: contacting remote service")
 
             if not self.models_loaded:
@@ -636,6 +731,19 @@ def build_desktop_classes():
                     )
                     return
 
+            missing_parts = self.validate_pipeline_configuration()
+            if missing_parts:
+                missing_summary = ", ".join(missing_parts)
+                self.backend_info_label.setText(
+                    f"Backend: request not sent. API is missing required modules: {missing_summary}"
+                )
+                QMessageBox.critical(
+                    self,
+                    "API Incomplete",
+                    "The deployed API cannot process this pipeline yet. Missing: " + missing_summary,
+                )
+                return
+
             if not self.api_client.health_check():
                 self.api_status_label.setText("API status: unavailable")
                 QMessageBox.critical(self, "API Error", "Could not reach the Render API.")
@@ -648,6 +756,7 @@ def build_desktop_classes():
             self.progress_bar.setValue(10)
             self.status_label.setText("Submitting work to remote API...")
             self.api_status_label.setText("API status: connected (keep-alive active)")
+            self.backend_info_label.setText("Backend: request in flight")
 
             self.pipeline_worker = PipelineWorker(
                 self.api_client,
@@ -656,7 +765,7 @@ def build_desktop_classes():
                 self.target_lang.currentText(),
                 self.detector_combo.currentText(),
                 self.ocr_combo.currentText(),
-                self.translator_combo.currentText(),
+                translator_name,
                 self.inpainter_combo.currentText(),
                 self.enable_detect.isChecked(),
                 self.enable_ocr.isChecked(),
@@ -674,11 +783,21 @@ def build_desktop_classes():
 
         def on_pipeline_complete(self, result: dict):
             try:
-                self.extracted_text.setText("\n".join(result.get("extracted_texts", [])))
-                self.translated_text.setText("\n".join(result.get("translated_texts", [])))
-
+                extracted_texts = result.get("extracted_texts", [])
+                translated_texts = result.get("translated_texts", [])
                 regions = result.get("detected_regions", [])
+                meta = result.get("_meta", {})
+                request_id = meta.get("request_id", "")
+
+                self.extracted_text.setText("\n".join(extracted_texts))
+                self.translated_text.setText("\n".join(translated_texts))
+
                 self.detection_info.setText(json.dumps(regions, indent=2) if regions else "No regions returned")
+                self.backend_info_label.setText(
+                    "Backend: request completed"
+                    + (f" | Render request id: {request_id}" if request_id else "")
+                    + f" | detected={len(regions)} extracted={len(extracted_texts)} translated={len(translated_texts)}"
+                )
 
                 inpainted_b64 = result.get("inpainted_image_base64")
                 if inpainted_b64:
@@ -694,10 +813,36 @@ def build_desktop_classes():
                     pixmap = QPixmap.fromImage(q_image)
                     scaled_pixmap = pixmap.scaledToHeight(300, Qt.TransformationMode.SmoothTransformation)
                     self.result_label.setPixmap(scaled_pixmap)
+                    self.result_label.setText("")
                     self.result_image = image
                     self.save_btn.setEnabled(True)
+                else:
+                    self.result_label.setPixmap(QPixmap())
+                    self.result_label.setText(
+                        "Pipeline finished, but no image was returned.\n"
+                        "This is expected when inpainting is disabled.\n"
+                        "Check the Extracted Text / Translated Text / Detection Info tabs."
+                    )
+                    self.result_image = None
+                    self.save_btn.setEnabled(False)
+
+                if not regions and not extracted_texts and not translated_texts and not inpainted_b64:
+                    missing_parts = self.validate_pipeline_configuration()
+                    if missing_parts:
+                        self.status_label.setText(
+                            "Pipeline returned no output because the backend is missing: " + ", ".join(missing_parts)
+                        )
+                        self.backend_info_label.setText(
+                            self.backend_info_label.text() + " | no usable backend modules were available"
+                        )
 
                 self.progress_bar.setValue(100)
+                if translated_texts:
+                    self.tabs.setCurrentIndex(2)
+                elif extracted_texts:
+                    self.tabs.setCurrentIndex(1)
+                else:
+                    self.tabs.setCurrentIndex(3)
                 self.status_label.setText("Pipeline completed successfully")
             except (OSError, ValueError) as exc:
                 QMessageBox.critical(self, "Error", f"Failed to display results: {exc}")
@@ -858,7 +1003,7 @@ def build_desktop_classes():
             }
             """
 
-    return QApplication, BallonsTranslatorDesktop
+    return BallonsTranslatorDesktop
 
 
 def main():
@@ -891,10 +1036,7 @@ def main():
         except RuntimeError as exc:
             print(f"Update check failed: {exc}")
 
-    QApplication, BallonsTranslatorDesktop = build_desktop_classes()
-
-    from PyQt6.QtCore import QLocale, QTranslator
-    from PyQt6.QtGui import QFont, QFontDatabase, QGuiApplication
+    BallonsTranslatorDesktop = build_desktop_classes()
 
     app = QApplication(sys.argv)
     app.setApplicationName("BalloonsTranslator")
