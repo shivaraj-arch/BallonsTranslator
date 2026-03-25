@@ -1,55 +1,27 @@
-# Render Deployment Configuration
-# save as render.yaml in repository root
+# Exported from Render on 2026-03-25T10:17:20Z
+version: "1"
+projects:
+- name: My project
+  environments:
+  - name: Production
+    services:
+    - type: web
+      name: ballons-translator-api
+      runtime: python
+      repo: https://github.com/shivaraj-arch/BallonsTranslator
+      plan: free
+      envVars:
+      - key: PYTHON_VERSION
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: WORKERS
+        sync: false
+      - key: PORT
+        sync: false
+      region: singapore
+      buildCommand: pip install -r requirements.txt
+      startCommand: uvicorn api.server:app --host 0.0.0.0 --port $PORT
+      healthCheckPath: /health
+      autoDeployTrigger: "off"
 
-services:
-  - type: web
-    name: ballons-translator-api
-    env: python
-    plan: free
-    
-    # Build settings
-    # Note: Using --no-deps and pip index to get torch CPU-only variant
-    # This avoids downloading 2.5GB+ of NVIDIA CUDA packages on free tier
-    buildCommand: >
-      pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu &&
-      pip install -r requirements.txt &&
-      pip install -r api/requirements.txt
-    
-    # Start command
-    startCommand: uvicorn api.server:app --host 0.0.0.0 --port $PORT
-    
-    # Environment variables
-    envVars:
-      - key: PYTHONUNBUFFERED
-        value: 1
-      - key: PYTHONDONTWRITEBYTECODE
-        value: 1
-      # Disable GPU support for Render free tier (CPU-only)
-      - key: CUDA_VISIBLE_DEVICES
-        value: ""
-      # Reduce memory usage for 512MB free tier limit
-      - key: PYTORCH_CUDA_ALLOC_CONF
-        value: "max_split_size_mb:256"
-    
-    # Health check
-    healthCheckPath: /health
-    healthCheckInterval: 30
-    
-    # Auto-deploy on git push
-    autoDeploy: true
-    
-    # GitHub integration
-    repo: YOUR_GITHUB_REPO_URL
-
-# Notes:
-# 1. Replace YOUR_GITHUB_REPO_URL with your actual GitHub repository URL
-# 2. Render will automatically detect and use this configuration
-# 3. Free tier provides:
-#    - 0.5 CPU
-#    - 512MB RAM
-#    - Auto-pause after 15 minutes of inactivity
-# 4. Build command installs torch from CPU index to avoid downloading 2.5GB+ 
-#    of NVIDIA CUDA packages (nvidia_cudnn, nvidia_cublas, etc.)
-#    These are unnecessary for CPU-only inference on Render free tier
-# 5. For local development with GPU acceleration, install torch normally:
-#    pip install torch torchvision (will pull CUDA packages on NVIDIA hardware)
