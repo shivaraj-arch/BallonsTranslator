@@ -39,6 +39,12 @@ parser.add_argument("--requirements", default="requirements_desktop.txt")
 parser.add_argument("--image", default="", help="Open an image file on startup")
 parser.add_argument("--ldpi", default=None, type=float, help="Logical dots per inch override")
 parser.add_argument("--timeout", default=300.0, type=float, help="HTTP timeout for API calls")
+parser.add_argument(
+    "--keepalive-interval",
+    default=240,
+    type=int,
+    help="Seconds between background health pings after the first successful API contact",
+)
 args, _ = parser.parse_known_args()
 
 
@@ -136,7 +142,7 @@ def prepare_environment():
 def build_desktop_classes():
     import httpx
     from PIL import Image
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal
+    from PyQt6.QtCore import Qt, QThread, QTimer, pyqtSignal
     from PyQt6.QtGui import QPixmap, QImage
     from PyQt6.QtWidgets import (
         QApplication,
@@ -156,6 +162,7 @@ def build_desktop_classes():
         QTabWidget,
         QFormLayout,
         QLineEdit,
+        QScrollArea,
     )
 
     class BallonsAPIClient:
@@ -176,11 +183,14 @@ def build_desktop_classes():
 
         def health_check(self) -> bool:
             try:
-                response = self.get_client().get(f"{self.base_url}/health")
+                response = self.get_client().get(
+                    f"{self.base_url}/health",
+                    timeout=min(self.timeout, 15.0),
+                )
                 return response.status_code == 200
             except httpx.HTTPError:
                 return False
-            except Exception:
+            except OSError:
                 return False
 
         def list_models(self):
@@ -190,8 +200,36 @@ def build_desktop_classes():
                 return response.json()
             except httpx.HTTPError as exc:
                 return {"status": "error", "message": str(exc), "models": {}}
-            except Exception as exc:
+            except (OSError, ValueError) as exc:
                 return {"status": "error", "message": str(exc), "models": {}}
+
+        def get_translator_languages(self, translator_name: str):
+            try:
+                response = self.get_client().get(
+                    f"{self.base_url}/translators/{translator_name}/languages"
+                )
+                response.raise_for_status()
+                return response.json()
+            except httpx.HTTPError as exc:
+                return {
+                    "status": "error",
+                    "translator": translator_name,
+                    "message": str(exc),
+                    "source_languages": [],
+                    "target_languages": [],
+                    "default_source": "Auto",
+                    "default_target": "English",
+                }
+            except (OSError, ValueError) as exc:
+                return {
+                    "status": "error",
+                    "translator": translator_name,
+                    "message": str(exc),
+                    "source_languages": [],
+                    "target_languages": [],
+                    "default_source": "Auto",
+                    "default_target": "English",
+                }
 
         def full_pipeline(
             self,
@@ -290,25 +328,40 @@ def build_desktop_classes():
             self.result_image = None
             self.pipeline_worker = None
             self.models_loaded = False
+            self.translator_languages = {}
+            self.keepalive_interval_ms = max(args.keepalive_interval, 30) * 1000
+            self.keepalive_timer = QTimer(self)
+            self.keepalive_timer.setInterval(self.keepalive_interval_ms)
+            self.keepalive_timer.timeout.connect(self.on_keepalive_tick)
 
             self.init_ui(api_url)
+            self.start_keepalive(immediate=True)
 
             if startup_image:
                 self.load_image_file(startup_image)
 
         def init_ui(self, api_url: str):
             self.setWindowTitle("BallonsTranslator Desktop")
-            self.setGeometry(100, 100, 1400, 900)
+            self.resize(1180, 760)
+            self.setMinimumSize(960, 680)
 
             central_widget = QWidget()
             self.setCentralWidget(central_widget)
             main_layout = QHBoxLayout()
+            main_layout.setContentsMargins(16, 16, 16, 16)
+            main_layout.setSpacing(16)
 
-            left_layout = QVBoxLayout()
+            left_panel = QWidget()
+            left_panel.setObjectName("leftPanel")
+            left_panel.setMaximumWidth(420)
+            left_layout = QVBoxLayout(left_panel)
+            left_layout.setContentsMargins(0, 0, 0, 0)
+            left_layout.setSpacing(12)
             right_layout = QVBoxLayout()
+            right_layout.setSpacing(12)
 
             title = QLabel("BallonsTranslator API Client")
-            title.setStyleSheet("font-size: 20px; font-weight: bold; color: #2c3e50;")
+            title.setObjectName("titleLabel")
             left_layout.addWidget(title)
 
             self.api_url_input = QLineEdit(api_url)
@@ -334,13 +387,18 @@ def build_desktop_classes():
 
             config_group = QGroupBox("Pipeline Configuration")
             config_layout = QFormLayout()
+            config_layout.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            config_layout.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+            config_layout.setFormAlignment(Qt.AlignmentFlag.AlignTop)
+            config_layout.setHorizontalSpacing(12)
+            config_layout.setVerticalSpacing(10)
 
             self.source_lang = QComboBox()
-            self.source_lang.addItems(["auto", "English", "Japanese", "Chinese", "Korean"])
+            self.source_lang.addItem("Auto")
             config_layout.addRow("Source", self.source_lang)
 
             self.target_lang = QComboBox()
-            self.target_lang.addItems(["English", "Spanish", "French", "German", "Chinese", "Japanese", "Korean"])
+            self.target_lang.addItem("English")
             config_layout.addRow("Target", self.target_lang)
 
             self.detector_combo = QComboBox()
@@ -350,6 +408,7 @@ def build_desktop_classes():
             config_layout.addRow("OCR", self.ocr_combo)
 
             self.translator_combo = QComboBox()
+            self.translator_combo.currentTextChanged.connect(self.on_translator_changed)
             config_layout.addRow("Translator", self.translator_combo)
 
             self.inpainter_combo = QComboBox()
@@ -379,9 +438,7 @@ def build_desktop_classes():
             self.translate_btn.clicked.connect(self.start_pipeline)
             self.translate_btn.setEnabled(False)
             self.translate_btn.setMinimumHeight(45)
-            self.translate_btn.setStyleSheet(
-                "background-color: #27ae60; color: white; font-weight: bold; font-size: 14px;"
-            )
+            self.translate_btn.setObjectName("primaryButton")
             left_layout.addWidget(self.translate_btn)
 
             self.progress_bar = QProgressBar()
@@ -392,6 +449,12 @@ def build_desktop_classes():
             self.status_label.setWordWrap(True)
             left_layout.addWidget(self.status_label)
             left_layout.addStretch()
+
+            left_scroll = QScrollArea()
+            left_scroll.setWidgetResizable(True)
+            left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            left_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+            left_scroll.setWidget(left_panel)
 
             self.tabs = QTabWidget()
 
@@ -437,7 +500,7 @@ def build_desktop_classes():
             self.save_btn.setMinimumHeight(40)
             right_layout.addWidget(self.save_btn)
 
-            main_layout.addLayout(left_layout, 1)
+            main_layout.addWidget(left_scroll, 0)
             main_layout.addLayout(right_layout, 2)
             central_widget.setLayout(main_layout)
             self.setStyleSheet(self.get_stylesheet())
@@ -449,15 +512,84 @@ def build_desktop_classes():
             for combo, items in (
                 (self.detector_combo, models.get("detectors", [])),
                 (self.ocr_combo, models.get("ocr", [])),
-                (self.translator_combo, models.get("translators", [])),
                 (self.inpainter_combo, models.get("inpainters", [])),
             ):
                 combo.clear()
                 combo.addItem("")
                 combo.addItems(items)
 
+            translators = models.get("translators", [])
+            self.translator_combo.blockSignals(True)
+            self.translator_combo.clear()
+            self.translator_combo.addItems(translators)
+            self.translator_combo.blockSignals(False)
+
+            default_translator = "google" if "google" in translators else (translators[0] if translators else "")
+            if default_translator:
+                self.translator_combo.setCurrentText(default_translator)
+                self.ensure_translator_languages(default_translator)
+
             self.models_loaded = any(bool(items) for items in models.values())
             return models_response
+
+        def start_keepalive(self, immediate: bool = False):
+            if not self.keepalive_timer.isActive():
+                self.keepalive_timer.start()
+            if immediate:
+                self.api_status_label.setText("API status: warming remote service")
+                self.on_keepalive_tick()
+
+        def stop_keepalive(self):
+            if self.keepalive_timer.isActive():
+                self.keepalive_timer.stop()
+
+        def on_keepalive_tick(self):
+            if self.api_client.health_check():
+                self.api_status_label.setText("API status: connected (keep-alive active)")
+            else:
+                self.api_status_label.setText("API status: unavailable")
+                self.stop_keepalive()
+
+        def ensure_translator_languages(self, translator_name: str):
+            if not translator_name:
+                return
+
+            cached = self.translator_languages.get(translator_name)
+            if cached is None:
+                cached = self.api_client.get_translator_languages(translator_name)
+                self.translator_languages[translator_name] = cached
+
+            if cached.get("status") != "success":
+                self.status_label.setText(
+                    f"Could not load languages for {translator_name}: {cached.get('message', 'Unknown error')}"
+                )
+                return
+
+            self.start_keepalive()
+
+            source_languages = cached.get("source_languages", []) or [cached.get("default_source", "Auto")]
+            target_languages = cached.get("target_languages", []) or [cached.get("default_target", "English")]
+            current_source = self.source_lang.currentText()
+            current_target = self.target_lang.currentText()
+
+            self.source_lang.blockSignals(True)
+            self.target_lang.blockSignals(True)
+            self.source_lang.clear()
+            self.target_lang.clear()
+            self.source_lang.addItems(source_languages)
+            self.target_lang.addItems(target_languages)
+            self.source_lang.setCurrentText(
+                current_source if current_source in source_languages else cached.get("default_source", source_languages[0])
+            )
+            self.target_lang.setCurrentText(
+                current_target if current_target in target_languages else cached.get("default_target", target_languages[0])
+            )
+            self.source_lang.blockSignals(False)
+            self.target_lang.blockSignals(False)
+
+        def on_translator_changed(self, translator_name: str):
+            if self.models_loaded and translator_name:
+                self.ensure_translator_languages(translator_name)
 
         def upload_image(self):
             file_path, _ = QFileDialog.getOpenFileName(
@@ -509,11 +641,13 @@ def build_desktop_classes():
                 QMessageBox.critical(self, "API Error", "Could not reach the Render API.")
                 return
 
+            self.start_keepalive()
+
             self.translate_btn.setEnabled(False)
             self.progress_bar.setVisible(True)
             self.progress_bar.setValue(10)
             self.status_label.setText("Submitting work to remote API...")
-            self.api_status_label.setText("API status: connected")
+            self.api_status_label.setText("API status: connected (keep-alive active)")
 
             self.pipeline_worker = PipelineWorker(
                 self.api_client,
@@ -596,6 +730,7 @@ def build_desktop_classes():
                 QMessageBox.critical(self, "Error", f"Failed to save image: {exc}")
 
         def closeEvent(self, event):
+            self.stop_keepalive()
             self.api_client.close()
             super().closeEvent(event)
 
@@ -603,14 +738,26 @@ def build_desktop_classes():
         def get_stylesheet() -> str:
             return """
             QMainWindow {
-                background-color: #ecf0f1;
+                background-color: #eef2f6;
+            }
+            QWidget {
+                color: #1f2933;
+                background-color: transparent;
+            }
+            QWidget#leftPanel {
+                background-color: transparent;
+            }
+            QLabel#titleLabel {
+                font-size: 20px;
+                font-weight: 700;
+                color: #1b2a41;
             }
             QPushButton {
                 background-color: #3498db;
                 color: white;
                 border: none;
                 border-radius: 5px;
-                padding: 8px;
+                padding: 10px 12px;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -619,27 +766,95 @@ def build_desktop_classes():
             QPushButton:pressed {
                 background-color: #1c5394;
             }
+            QPushButton:disabled {
+                background-color: #b8c5d1;
+                color: #f7fafc;
+            }
+            QPushButton#primaryButton {
+                background-color: #1f9d55;
+                color: #ffffff;
+                font-size: 14px;
+            }
+            QPushButton#primaryButton:hover {
+                background-color: #19804a;
+            }
             QGroupBox {
-                color: #2c3e50;
-                border: 2px solid #3498db;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
+                color: #1f2933;
+                background-color: #f8fafc;
+                border: 1px solid #c7d2de;
+                border-radius: 8px;
+                margin-top: 12px;
+                padding: 14px 12px 12px 12px;
+                font-weight: 600;
             }
             QGroupBox::title {
                 subcontrol-origin: margin;
                 left: 10px;
-                padding: 0 5px 0 5px;
+                padding: 0 6px;
             }
             QComboBox, QLineEdit {
-                padding: 5px;
-                border: 1px solid #bdc3c7;
-                border-radius: 3px;
+                min-height: 18px;
+                padding: 7px 9px;
+                color: #111827;
+                background-color: #ffffff;
+                border: 1px solid #b9c5d3;
+                border-radius: 6px;
+            }
+            QComboBox QAbstractItemView {
+                color: #111827;
+                background-color: #ffffff;
+                selection-color: #111827;
+                selection-background-color: #dbeafe;
+            }
+            QTextEdit, QLabel {
+                color: #1f2933;
             }
             QTextEdit {
-                border: 1px solid #bdc3c7;
-                border-radius: 3px;
-                padding: 5px;
+                background-color: #ffffff;
+                border: 1px solid #b9c5d3;
+                border-radius: 6px;
+                padding: 6px;
+                selection-color: #111827;
+                selection-background-color: #dbeafe;
+            }
+            QCheckBox {
+                color: #1f2933;
+                spacing: 8px;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+            }
+            QTabWidget::pane {
+                border: 1px solid #c7d2de;
+                background: #ffffff;
+                border-radius: 8px;
+            }
+            QTabBar::tab {
+                background: #dde5ee;
+                color: #243b53;
+                padding: 8px 12px;
+                margin-right: 4px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+            }
+            QTabBar::tab:selected {
+                background: #ffffff;
+                color: #111827;
+            }
+            QProgressBar {
+                color: #111827;
+                background-color: #ffffff;
+                border: 1px solid #b9c5d3;
+                border-radius: 6px;
+                text-align: center;
+            }
+            QProgressBar::chunk {
+                background-color: #3498db;
+                border-radius: 5px;
+            }
+            QScrollArea {
+                border: none;
             }
             """
 

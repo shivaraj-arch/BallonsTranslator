@@ -14,7 +14,8 @@ import numpy as np
 from .pipeline import (
     get_pipeline, 
     get_available_models, 
-    TranslationPipeline
+    TranslationPipeline,
+    get_translator_languages,
 )
 
 # Configure logging
@@ -57,6 +58,18 @@ class LoadModelRequest(BaseModel):
     ocr: Optional[str] = None
     translator: Optional[str] = None
     inpainter: Optional[str] = None
+    source_lang: Optional[str] = "Auto"
+    target_lang: str = "English"
+
+
+class TranslatorLanguagesResponse(BaseModel):
+    status: str
+    translator: str
+    source_languages: List[str] = []
+    target_languages: List[str] = []
+    default_source: str = "Auto"
+    default_target: str = "English"
+    message: Optional[str] = None
 
 class DetectRequest(BaseModel):
     image_base64: str
@@ -79,7 +92,7 @@ class OCRResponse(BaseModel):
 
 class TranslateRequest(BaseModel):
     texts: List[str]
-    source_lang: Optional[str] = "auto"
+    source_lang: Optional[str] = "Auto"
     target_lang: str = "English"
 
 class TranslateResponse(BaseModel):
@@ -99,7 +112,7 @@ class InpaintResponse(BaseModel):
 
 class FullPipelineRequest(BaseModel):
     image_base64: str
-    source_lang: Optional[str] = "auto"
+    source_lang: Optional[str] = "Auto"
     target_lang: str = "English"
     detector: Optional[str] = None
     ocr: Optional[str] = None
@@ -171,6 +184,16 @@ def list_models():
         "total": sum(len(v) for v in models.values() if isinstance(v, list))
     }
 
+
+@app.get("/translators/{translator_name}/languages", response_model=TranslatorLanguagesResponse)
+def list_translator_languages(translator_name: str):
+    """Return supported source and target languages for a specific translator."""
+    result = get_translator_languages(translator_name)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to inspect translator"))
+
+    return TranslatorLanguagesResponse(**result)
+
 @app.post("/models/load")
 def load_models(request: LoadModelRequest):
     """Load specific ML models"""
@@ -184,7 +207,11 @@ def load_models(request: LoadModelRequest):
         results['ocr'] = pipeline.load_ocr(request.ocr)
     
     if request.translator:
-        results['translator'] = pipeline.load_translator(request.translator)
+        results['translator'] = pipeline.load_translator(
+            request.translator,
+            request.source_lang or "Auto",
+            request.target_lang,
+        )
     
     if request.inpainter:
         results['inpainter'] = pipeline.load_inpainter(request.inpainter)
@@ -374,7 +401,11 @@ async def full_translation_pipeline(request: FullPipelineRequest):
         if request.ocr:
             pipeline.load_ocr(request.ocr)
         if request.translator:
-            pipeline.load_translator(request.translator)
+            pipeline.load_translator(
+                request.translator,
+                request.source_lang or "Auto",
+                request.target_lang,
+            )
         if request.inpainter:
             pipeline.load_inpainter(request.inpainter)
         

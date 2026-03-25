@@ -8,7 +8,7 @@ import base64
 import io
 from functools import lru_cache
 import numpy as np
-from typing import List, Dict, Optional
+from typing import Any, List, Dict, Optional
 from PIL import Image
 import logging
 
@@ -38,6 +38,25 @@ except ImportError as e:
     IMPORTS_AVAILABLE = False
 
 
+@lru_cache(maxsize=1)
+def initialize_runtime_modules() -> bool:
+    """Initialize module registries the same way the desktop launcher does."""
+    if not IMPORTS_AVAILABLE:
+        return False
+
+    try:
+        from modules.base import init_module_registries
+        from modules.prepare_local_files import prepare_local_files_forall
+
+        init_module_registries()
+        prepare_local_files_forall()
+        logger.info("Module registries initialized successfully")
+        return True
+    except PIPELINE_EXCEPTIONS as e:
+        logger.error("Failed to initialize module registries: %s", e)
+        return False
+
+
 class TranslationPipeline:
     """Main translation pipeline for processing images"""
     
@@ -52,6 +71,7 @@ class TranslationPipeline:
         
         if IMPORTS_AVAILABLE:
             try:
+                initialize_runtime_modules()
                 if config_path and os.path.exists(config_path):
                     from utils import config as program_config
                     program_config.load_config(config_path)
@@ -97,7 +117,12 @@ class TranslationPipeline:
             logger.error("Failed to load OCR: %s", e)
             return {"status": "error", "message": str(e)}
     
-    def load_translator(self, translator_name: str = "google"):
+    def load_translator(
+        self,
+        translator_name: str = "google",
+        source_lang: str = "Auto",
+        target_lang: str = "English",
+    ):
         """Load translation model/API"""
         if not IMPORTS_AVAILABLE:
             return {"status": "stub", "message": "Running in stub mode"}
@@ -105,7 +130,12 @@ class TranslationPipeline:
         try:
             from modules import TRANSLATORS
             if translator_name in TRANSLATORS.module_dict:
-                self.translator = TRANSLATORS.module_dict[translator_name]()
+                translator_module = TRANSLATORS.module_dict[translator_name]
+                self.translator = translator_module(
+                    source_lang,
+                    target_lang,
+                    raise_unsupported_lang=False,
+                )
                 logger.info("Loaded translator: %s", translator_name)
                 return {"status": "success", "translator": translator_name}
             else:
@@ -290,6 +320,8 @@ def get_available_models() -> Dict:
             "translators": [],
             "inpainters": []
         }
+
+    initialize_runtime_modules()
     
     return {
         "detectors": list(GET_VALID_TEXTDETECTORS()),
@@ -297,3 +329,50 @@ def get_available_models() -> Dict:
         "translators": list(GET_VALID_TRANSLATORS()),
         "inpainters": list(GET_VALID_INPAINTERS())
     }
+
+
+def get_translator_languages(translator_name: str) -> Dict[str, Any]:
+    """Get supported source and target languages for a translator."""
+    if not IMPORTS_AVAILABLE:
+        return {
+            "status": "stub",
+            "translator": translator_name,
+            "source_languages": [],
+            "target_languages": [],
+            "default_source": "Auto",
+            "default_target": "English",
+        }
+
+    initialize_runtime_modules()
+
+    try:
+        from modules import TRANSLATORS
+
+        if translator_name not in TRANSLATORS.module_dict:
+            return {
+                "status": "error",
+                "message": f"Translator {translator_name} not found",
+            }
+
+        translator_module = TRANSLATORS.module_dict[translator_name]
+        translator = translator_module("Auto", "English", raise_unsupported_lang=False)
+
+        return {
+            "status": "success",
+            "translator": translator.name,
+            "source_languages": list(translator.supported_src_list),
+            "target_languages": list(translator.supported_tgt_list),
+            "default_source": translator.lang_source,
+            "default_target": translator.lang_target,
+        }
+    except PIPELINE_EXCEPTIONS as e:
+        logger.error("Failed to get translator languages for %s: %s", translator_name, e)
+        return {
+            "status": "error",
+            "message": str(e),
+            "translator": translator_name,
+            "source_languages": [],
+            "target_languages": [],
+            "default_source": "Auto",
+            "default_target": "English",
+        }
