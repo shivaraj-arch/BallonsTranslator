@@ -35,6 +35,8 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+APP_VERSION = "1.0.0"
+
 # Enable CORS for all origins
 app.add_middleware(
     CORSMiddleware,
@@ -136,12 +138,12 @@ class FullPipelineResponse(BaseModel):
 # Root & Health Check Endpoints
 # ============================================
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root():
     """Root endpoint - API information"""
     return {
         "service": "BallonsTranslator API",
-        "version": "1.0.0",
+        "version": APP_VERSION,
         "description": "ML-powered manga/comic translation pipeline",
         "docs": "/docs",
         "endpoints": {
@@ -162,13 +164,12 @@ def root():
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    """Health check endpoint"""
-    pipeline = get_pipeline()
+    """Lightweight health check endpoint for Render readiness probes."""
     return HealthResponse(
         status="healthy",
         service="BallonsTranslator API",
-        version="1.0.0",
-        models_available=pipeline.initialized
+        version=APP_VERSION,
+        models_available=True,
     )
 
 # ============================================
