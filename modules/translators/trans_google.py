@@ -1,4 +1,5 @@
 from .base import *
+from deep_translator import GoogleTranslator as DeepTranslatorGoogleTranslator
 import requests
 import json
 import html # For html.unescape
@@ -128,6 +129,7 @@ class GoogleTranslateProviderPython:
 class TransGoogle(BaseTranslator):
 
     concate_text = False
+    default_fallback_name = "deep-translator"
     params: Dict = {
         "delay": 0.0,
     }
@@ -160,6 +162,7 @@ class TransGoogle(BaseTranslator):
         self.lang_map["Hindi"] = "hi"
         self.lang_map["Malayalam"] = "ml"
         self.lang_map["Tamil"] = "ta"
+
         # Additional languages
         self.lang_map["Afrikaans"] = "af"
         self.lang_map["Albanian"] = "sq"
@@ -210,53 +213,39 @@ class TransGoogle(BaseTranslator):
         self.lang_map["Lithuanian"] = "lt"
         self.lang_map["Luxembourgish"] = "lb"
         self.lang_map["Macedonian"] = "mk"
-        self.lang_map["Malagasy"] = "mg"
-        self.lang_map["Malay"] = "ms"
-        self.lang_map["Maltese"] = "mt"
-        self.lang_map["Marathi"] = "mr"
-        self.lang_map["Mongolian"] = "mn"
-        self.lang_map["Myanmar"] = "my"
-        self.lang_map["Nepali"] = "ne"
-        self.lang_map["Norwegian"] = "no"
-        self.lang_map["Odia"] = "or"
-        self.lang_map["Pashto"] = "ps"
-        self.lang_map["Persian"] = "fa"
-        self.lang_map["Punjabi"] = "pa"
-        self.lang_map["Quechua"] = "qu"
-        self.lang_map["Romanian"] = "ro"
-        self.lang_map["Samoan"] = "sm"
-        self.lang_map["Sanskrit"] = "sa"
-        self.lang_map["Scots Gaelic"] = "gd"
-        self.lang_map["Serbian"] = "sr"
-        self.lang_map["Sesotho"] = "st"
-        self.lang_map["Shona"] = "sn"
-        self.lang_map["Sindhi"] = "sd"
-        self.lang_map["Sinhala"] = "si"
-        self.lang_map["Slovak"] = "sk"
-        self.lang_map["Slovenian"] = "sl"
-        self.lang_map["Somali"] = "so"
-        self.lang_map["Sundanese"] = "su"
-        self.lang_map["Swahili"] = "sw"
-        self.lang_map["Swedish"] = "sv"
-        self.lang_map["Tagalog"] = "tl"
-        self.lang_map["Tajik"] = "tg"
-        self.lang_map["Tatar"] = "tt"
-        self.lang_map["Telugu"] = "te"
-        self.lang_map["Tetum"] = "tet"
-        self.lang_map["Tigrinya"] = "ti"
-        self.lang_map["Tok Pisin"] = "tpi"
-        self.lang_map["Tsonga"] = "ts"
-        self.lang_map["Tswana"] = "tn"
-        self.lang_map["Twi"] = "tw"
-        self.lang_map["Udmurt"] = "udm"
-        self.lang_map["Uyghur"] = "ug"
-        self.lang_map["Uzbek"] = "uz"
-        self.lang_map["Welsh"] = "cy"
-        self.lang_map["Xhosa"] = "xh"
-        self.lang_map["Yiddish"] = "yi"
-        self.lang_map["Yoruba"] = "yo"
-        self.lang_map["Zulu"] = "zu"
 
+    def _translate_with_private_api_fallback(self, src_list: List[str], reason: str) -> List[str]:
+        source_lang_code = self.lang_map.get(self.lang_source, "auto")
+        target_lang_code = self.lang_map.get(self.lang_target, "en")
+
+        LOGGER.warning(
+            "deep-translator failed (%s). Falling back to Google private API for %s -> %s.",
+            reason,
+            self.lang_source,
+            self.lang_target,
+        )
+
+        response_data = self.internal_google_translator.translate(
+            src_list,
+            target_language=target_lang_code,
+            source_language=source_lang_code,
+        )
+
+        if response_data and isinstance(response_data.get("translations"), list):
+            translated_texts = response_data["translations"]
+            if len(translated_texts) == len(src_list):
+                LOGGER.info(
+                    "Google private API fallback completed for %s text block(s).",
+                    len(src_list),
+                )
+                return translated_texts
+
+        LOGGER.error(
+            "Google private API fallback returned an invalid response for %s text block(s).",
+            len(src_list),
+        )
+        return [""] * len(src_list)
+    
     def _translate(self, src_list: List[str]) -> List[str]:
         if not src_list:
             return []
@@ -264,24 +253,31 @@ class TransGoogle(BaseTranslator):
         try:
             source_lang_code = self.lang_map.get(self.lang_source, "auto")
             target_lang_code = self.lang_map.get(self.lang_target, "en")
-
-            response_data = self.internal_google_translator.translate(
-                src_list,
-                target_language=target_lang_code,
-                source_language=source_lang_code,
+            translated_texts = []
+            translator = DeepTranslatorGoogleTranslator(
+                source=source_lang_code,
+                target=target_lang_code,
             )
+            for text_item in src_list:
+                if not text_item or not text_item.strip():
+                    translated_texts.append("")
+                    continue
+                translated_texts.append(translator.translate(text_item))
 
-            if response_data and isinstance(response_data.get("translations"), list):
-                translated_texts = response_data["translations"]
-                if len(translated_texts) == len(src_list):
-                    return translated_texts
+            LOGGER.info(
+                "Primary translator %s completed for %s text block(s).",
+                self.default_fallback_name,
+                len(src_list),
+            )
+            return translated_texts
 
-            # In case of mismatch or error, we return empty strings
-            return [""] * len(src_list)
-
-        except ProviderError as e:
-            LOGGER.error(f"Google Translate provider error: {e}")
-            return [""] * len(src_list)
         except Exception as e:
-            LOGGER.error(f"An unexpected error occurred in Google Translate: {e}")
-            return [""] * len(src_list)
+            LOGGER.warning("Primary translator %s failed: %s", self.default_fallback_name, e)
+            try:
+                return self._translate_with_private_api_fallback(src_list, str(e))
+            except ProviderError as fallback_error:
+                LOGGER.error("Google private API fallback failed: %s", fallback_error)
+                return [""] * len(src_list)
+            except Exception as fallback_error:
+                LOGGER.error("Unexpected error in Google private API fallback: %s", fallback_error)
+                return [""] * len(src_list)

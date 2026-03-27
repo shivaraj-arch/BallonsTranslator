@@ -34,6 +34,7 @@ keyboard
 ordered-set
 opencc-python-reimplemented
 requests
+deep-translator
 ultralytics>=8.4.14
 beautifulsoup4
 colorama
